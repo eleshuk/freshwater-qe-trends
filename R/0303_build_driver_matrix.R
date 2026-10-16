@@ -1,8 +1,8 @@
-# Code to merge external drivers with WFD data
-library(arrow)
-library(dplyr)
-library(tidyr)
-# ---- Timer utility ----
+# Merge external drivers with WFD data and build the model-ready dataframe
+# Uses cached data when prompted to avoid recalculating for each metric
+# Recomputes a cache when an input file is newer than it
+
+
 # Tracks elapsed time per step and prints a summary at the end
 make_timer <- function() {
   log <- list()
@@ -41,12 +41,16 @@ make_timer <- function() {
   
   list(start = start, done = done, summary = summary)
 }
-# ---- Cache helper ----
 # Checks for cached parquet; if found, reads it. Otherwise runs compute_fn,
 # saves the result, and returns it.
 cached_prepare <- function(cache_path, compute_fn, timer, step_name,
-                           use_cache = TRUE) {
-  if (use_cache && file.exists(cache_path)) {
+                           use_cache = TRUE, input_path = NULL) {
+  # Treat the cache as stale when any input file was modified after it was written
+  is_stale <- !is.null(input_path) && file.exists(cache_path) &&
+    any(file.mtime(input_path) > file.mtime(cache_path), na.rm = TRUE)
+  if (is_stale) message(step_name, ": input is newer than cache, recomputing")
+  
+  if (use_cache && file.exists(cache_path) && !is_stale) {
     timer$start(paste0(step_name, " [cached]"))
     result <- arrow::read_parquet(cache_path)
     timer$done(sprintf("%d rows from cache", nrow(result)))
@@ -63,7 +67,7 @@ cached_prepare <- function(cache_path, compute_fn, timer, step_name,
   
   result
 }
-# ---- 1. Build pressure matrix ----
+# Build pressure matrix
 build_pressure_matrix <- function(wfd_root, timer) {
   
   kept_substances <- c(
@@ -116,16 +120,16 @@ build_pressure_matrix <- function(wfd_root, timer) {
   
   timer$start("Read WFD parquets (reference, substance, pressure)")
   ref <- arrow::read_parquet(
-    paste0(wfd_root, "parquet_tables_cleaned/swb_reference_filtered/part-0.parquet")
+    file.path(wfd_root, "parquet_tables_cleaned", "swb_reference_filtered", "part-0.parquet")
   ) |>
     dplyr::select(cYear, euSurfaceWaterBodyCode, naturalAWBHMWB)
   
   substance <- arrow::read_parquet(
-    paste0(wfd_root, "parquet_tables_cleaned/swb_surface_water_body_sw_priority_substance/part-0.parquet")
+    file.path(wfd_root, "parquet_tables_cleaned", "swb_surface_water_body_sw_priority_substance", "part-0.parquet")
   )
   
   pressure <- arrow::read_parquet(
-    paste0(wfd_root, "parquet_tables_cleaned/swb_surface_water_body_sw_significant_pressure_type/part-0.parquet")
+    file.path(wfd_root, "parquet_tables_cleaned", "swb_surface_water_body_sw_significant_pressure_type", "part-0.parquet")
   )
   timer$done(sprintf("ref=%d, substance=%d, pressure=%d rows",
                      nrow(ref), nrow(substance), nrow(pressure)))
@@ -212,12 +216,13 @@ build_pressure_matrix <- function(wfd_root, timer) {
       ),
       dplyr::across(dplyr::all_of(pressure_cols), ~ tidyr::replace_na(., 0L))
     ) |>
-    dplyr::select(-.has_substance)
+    # Keep the flag so "no substance data" (coded 0 above) can be told apart from "monitored, not failing"
+    dplyr::rename(has_substance_data = .has_substance)
   
   timer$done(sprintf("%d x %d", nrow(pm), ncol(pm)))
   pm
 }
-# ---- 2. Prepare CLC ----
+# Prepare CLC
 prepare_clc <- function(clc_path, year_map, timer) {
   timer$start("Prepare CLC land cover")
   
@@ -247,7 +252,6 @@ prepare_clc <- function(clc_path, year_map, timer) {
   timer$done(sprintf("%d rows", nrow(result)))
   result
 }
-# ---- 3. Prepare climate ----
 # Reads each parquet once (as separate dataframes, not bound — to stay within
 # memory), uses matrixStats for fast row operations
 prepare_climate_bioclim <- function(climate_dir, timer) {
@@ -396,7 +400,7 @@ prepare_climate_bioclim <- function(climate_dir, timer) {
   timer$done(sprintf("%d rows, %d columns", nrow(result), ncol(result)))
   result
 }
-# ---- 4. Prepare nitrogen ----
+# Prepare nitrogen
 prepare_nitrogen <- function(nitrogen_path, year_map, timer) {
   timer$start("Prepare nitrogen")
   nitrogen <- arrow::read_parquet(nitrogen_path)
@@ -422,7 +426,7 @@ prepare_nitrogen <- function(nitrogen_path, year_map, timer) {
   timer$done(sprintf("%d rows", nrow(result)))
   result
 }
-# ---- 5. Prepare phosphorus ----
+# Prepare phosphorus
 prepare_phosphorus <- function(phosphorus_path, year_map, timer) {
   timer$start("Prepare phosphorus")
   phosphorus <- arrow::read_parquet(phosphorus_path)
@@ -448,7 +452,7 @@ prepare_phosphorus <- function(phosphorus_path, year_map, timer) {
   timer$done(sprintf("%d rows", nrow(result)))
   result
 }
-# ---- 6. Prepare imperviousness ----
+# Prepare imperviousness
 prepare_imperviousness <- function(imd_path, year_map, timer) {
   timer$start("Prepare imperviousness")
   imd <- arrow::read_parquet(imd_path)
@@ -461,7 +465,7 @@ prepare_imperviousness <- function(imd_path, year_map, timer) {
   timer$done(sprintf("%d rows", nrow(result)))
   result
 }
-# ---- 7. Prepare AMBER ----
+# Prepare AMBER
 prepare_amber <- function(amber_path, timer) {
   timer$start("Prepare AMBER barriers")
   amber_raw <- arrow::read_parquet(amber_path)
@@ -485,15 +489,16 @@ prepare_amber <- function(amber_path, timer) {
   result
 }
 
-# ---- 9. Merge drivers onto pressure matrix ----
-merge_drivers <- function(pressure_matrix, root, workflow_gpkg, timer,
+# Merge drivers onto pressure matrix
+merge_drivers <- function(pressure_matrix, drivers_root, workflow_gpkg, timer,
                           cache_dir, use_cache = TRUE) {
   
+  # Land cover and imperviousness years per cycle; climate, N and P use period averages instead
   year_map <- tibble::tribble(
-    ~cYear, ~clc_year, ~imd_year, ~n_year, ~p_year, ~climate_year,
-    "2010",     2006L,     2009L,   2010L,   2010L,         2010L,
-    "2016",     2012L,     2015L,   2016L,   2016L,         2016L,
-    "2022",     2018L,     2018L,   2019L,   2019L,         2022L
+    ~cYear, ~clc_year, ~imd_year,
+    "2010",     2006L,     2009L,
+    "2016",     2012L,     2015L,
+    "2022",     2018L,     2018L
   )
   
   # Read bridge table via DBI (no geometry, skip sf overhead)
@@ -510,56 +515,53 @@ merge_drivers <- function(pressure_matrix, root, workflow_gpkg, timer,
   DBI::dbDisconnect(con)
   timer$done(sprintf("%d rows", nrow(swb_ccm)))
   
-  # Prepare each driver — uses cache if available
-  # clc_path <- paste0(root, "drivers_data/land_cover/Results/outputs/clc_catchment_area_by_class.parquet")
-  clc_path <- paste0(root, "data/land_cover/Results/outputs/clc_catchment_area_by_class.parquet")
+  # Input paths for each driver (outputs of the extract_drivers pipeline), also used to spot stale caches
+  clc_path <- file.path(drivers_root, "land_cover", "outputs", "clc_catchment_area_by_class.parquet")
+  climate_dir <- file.path(drivers_root, "climate", "outputs")
+  climate_files <- file.path(climate_dir, c(
+    "climate_tg_mean.parquet", "climate_tn_mean.parquet", "climate_tx_mean.parquet",
+    "climate_rr_sum.parquet", "climate_hu_mean.parquet"
+  ))
+  nitrogen_path <- file.path(drivers_root, "nitrogen", "outputs", "nitrogen_catchment.parquet")
+  phosphorus_path <- file.path(drivers_root, "phosphorus", "outputs", "phosphorus_catchment.parquet")
+  imd_path <- file.path(drivers_root, "imperviousness_density", "outputs", "imperviousness_catchment.parquet")
+  amber_path <- file.path(drivers_root, "dams", "outputs", "amber_catchment.parquet")
+  
+  # Prepare each driver, reading the cache unless it is missing or older than its input
   clc <- cached_prepare(
     file.path(cache_dir, "cache_clc_prepared.parquet"),
     \() prepare_clc(clc_path, year_map, timer),
-    timer, "CLC land cover", use_cache
+    timer, "CLC land cover", use_cache, clc_path
   )
   
   climate <- cached_prepare(
     file.path(cache_dir, "cache_climate_bioclim.parquet"),
-    \() prepare_climate_bioclim(
-      # paste0(root, "drivers_data/climate/outputs/"), timer),
-      paste0(root, "data/climate/outputs/"), timer),
-    timer, "Climate bioclim", use_cache
+    \() prepare_climate_bioclim(climate_dir, timer),
+    timer, "Climate bioclim", use_cache, climate_files
   )
   
   nitrogen <- cached_prepare(
     file.path(cache_dir, "cache_nitrogen_prepared.parquet"),
-    \() prepare_nitrogen(
-      # paste0(root, "drivers_data/nitrogen/outputs/nitrogen_catchment.parquet"),
-      paste0(root, "data/nitrogen/outputs/nitrogen_catchment.parquet"),
-      year_map, timer),
-    timer, "Nitrogen", use_cache
+    \() prepare_nitrogen(nitrogen_path, year_map, timer),
+    timer, "Nitrogen", use_cache, nitrogen_path
   )
   
   phosphorus <- cached_prepare(
     file.path(cache_dir, "cache_phosphorus_prepared.parquet"),
-    \() prepare_phosphorus(
-      # paste0(root, "drivers_data/phosphorus/outputs/phosphorus_catchment.parquet"),
-      paste0(root, "data/phosphorus/outputs/phosphorus_catchment.parquet"),
-      year_map, timer),
-    timer, "Phosphorus", use_cache
+    \() prepare_phosphorus(phosphorus_path, year_map, timer),
+    timer, "Phosphorus", use_cache, phosphorus_path
   )
   
   imd <- cached_prepare(
     file.path(cache_dir, "cache_imd_prepared.parquet"),
-    \() prepare_imperviousness(
-      # paste0(root, "drivers_data/imperviousness_density/outputs/imperviousness_catchment.parquet"),
-      paste0(root, "data/imperviousness_density/outputs/imperviousness_catchment.parquet"),
-      year_map, timer),
-    timer, "Imperviousness", use_cache
+    \() prepare_imperviousness(imd_path, year_map, timer),
+    timer, "Imperviousness", use_cache, imd_path
   )
   
   amber <- cached_prepare(
     file.path(cache_dir, "cache_amber_prepared.parquet"),
-    \() prepare_amber(
-      # paste0(root, "drivers_data/dams/outputs/amber_catchment.parquet"), timer),
-      paste0(root, "data/dams/outputs/amber_catchment.parquet"), timer),
-    timer, "AMBER barriers", use_cache
+    \() prepare_amber(amber_path, timer),
+    timer, "AMBER barriers", use_cache, amber_path
   )
   
   # Assemble time-varying drivers
@@ -656,17 +658,18 @@ merge_drivers <- function(pressure_matrix, root, workflow_gpkg, timer,
   timer$start("Final join: drivers onto pressure matrix")
   result <- pressure_matrix |>
     dplyr::left_join(driver_agg,
-                     by = c("euSurfaceWaterBodyCode" = "WB_code", "cYear"))
+                     by = c("euSurfaceWaterBodyCode" = "WB_code", "cYear"),
+                     relationship = "many-to-one")
   timer$done(sprintf("%d x %d", nrow(result), ncol(result)))
   result
 }
-# ---- 10. Build model-ready dataframe ----
+# Build model-ready dataframe
 build_model_ready <- function(pressure_with_drivers, wfd_root,
                               filter_to_drivers = FALSE, timer) {
   
   timer$start("Build model-ready dataframe (BQE join)")
   bqe <- arrow::read_parquet(
-    paste0(wfd_root, "/parquet_tables_joined/joined_bqe_ref_w2010_final.parquet")
+    file.path(wfd_root, "parquet_tables_joined", "joined_bqe_ref_w2010_final.parquet")
   )
   status_levels <- c("1", "2", "3", "4", "5")
   status_labels <- c("High", "Good", "Moderate", "Poor", "Bad")
@@ -678,7 +681,8 @@ build_model_ready <- function(pressure_with_drivers, wfd_root,
       surfaceWaterBodyCategory
     ) |>
     dplyr::left_join(pressure_with_drivers,
-                     by = c("cYear", "euSurfaceWaterBodyCode")) |>
+                     by = c("cYear", "euSurfaceWaterBodyCode"),
+                     relationship = "many-to-one") |>
     dplyr::mutate(
       qeStatus = factor(qeStatusOrPotentialValue,
                         levels = status_levels,
@@ -689,6 +693,9 @@ build_model_ready <- function(pressure_with_drivers, wfd_root,
       cYear = factor(cYear)
     )
   
+  # The left join must keep exactly one row per BQE record
+  stopifnot(nrow(model_df) == nrow(bqe))
+  
   if (filter_to_drivers) {
     model_df <- model_df |>
       dplyr::filter(!is.na(bio01))
@@ -697,7 +704,7 @@ build_model_ready <- function(pressure_with_drivers, wfd_root,
   timer$done(sprintf("%d rows, %d columns", nrow(model_df), ncol(model_df)))
   model_df
 }
-# ---- 11. Diagnostics ----
+# Diagnostics
 run_diagnostics <- function(model_df) {
   
   n_total <- nrow(model_df)
@@ -736,85 +743,60 @@ run_diagnostics <- function(model_df) {
     tidyr::pivot_wider(names_from = cYear, values_from = n) |>
     print(n = Inf)
 }
-# ---- Run the pipeline ----
-# use_cache: if TRUE, reads cached driver parquets when they exist instead of
-#   recomputing. Set FALSE (or delete cache files) to force a fresh compute.
-# cache_dir: where to store/read the cache parquets (defaults to thesis_data/)
-run_driver_pipeline <- function(use_cache = TRUE) {
+# Run the whole driver matrix build and write pressure_matrix, pressure_matrix_with_drivers and model_ready to model_dir
+# use_cache: if TRUE, reads cached driver parquets when they exist instead of recomputing.
+#   Set FALSE (or delete cache files) to force a fresh compute
+run_driver_pipeline <- function(wfd_root, drivers_root, workflow_gpkg, cache_dir, model_dir, use_cache = TRUE) {
   timer <- make_timer()
   pipeline_start <- proc.time()
-  
-  root <- "~/Documents/ISA_class_materials/Thesis/"
-  # root <- "/Users/isa128539/Desktop/"
-  # wfd_root <- paste0(root, "data/WFD/")
-  wfd_root <- paste0(root, "data/WFD/")
-  # wfd_root <- paste0(root, "thesis_data/")
-  workflow_gpkg <- paste0(root, "Spatial_workflow_work/Workflow_WFD/Output/Workflow_outputs.gpkg")
-  # workflow_gpkg <- paste0(root, "thesis_data/Workflow_outputs.gpkg")
-  # cache_dir <- paste0(root, "thesis_data/driver_cache/")
-  cache_dir <- paste0(root, "data/driver_cache/")
-  
-  # Create cache directory if it doesn't exist
-  if (!dir.exists(cache_dir)) dir.create(cache_dir, recursive = TRUE)
-  
+
+  dir.create(cache_dir, showWarnings = FALSE, recursive = TRUE)
+  dir.create(model_dir, showWarnings = FALSE, recursive = TRUE)
+
   if (use_cache) {
-    message("Cache enabled — cached drivers will be read from: ", cache_dir)
-    message("To force recompute, run: run_driver_pipeline(use_cache = FALSE)")
+    message("Cache enabled, cached drivers will be read from: ", cache_dir)
+    message("To force recompute, set use_cache = FALSE")
     message("Or delete individual cache files to recompute just that driver.\n")
   }
-  
+
   # Step 1: pressure matrix
   pm <- build_pressure_matrix(wfd_root, timer)
   cat("Pressure matrix dimensions:", nrow(pm), "x", ncol(pm), "\n")
-  
+
   timer$start("Write pressure_matrix.parquet")
-  arrow::write_parquet(pm,
-                       paste0(root, "outputs/model/pressure_matrix.parquet"))
+  arrow::write_parquet(pm, file.path(model_dir, "pressure_matrix.parquet"))
   timer$done()
-  
+
   # Step 2: merge drivers
-  pm_drivers <- merge_drivers(pm, root, workflow_gpkg, timer,
-                              cache_dir, use_cache)
-  rm(pm); gc()
-  
+  pm_drivers <- merge_drivers(pm, drivers_root, workflow_gpkg, timer, cache_dir, use_cache)
+  rm(pm)
+  gc()
   cat("Driver merge dimensions:", nrow(pm_drivers), "x", ncol(pm_drivers), "\n")
-  
+
   timer$start("Write pressure_matrix_with_drivers.parquet")
-  # arrow::write_parquet(pm_drivers,
-  #                      paste0(root, "thesis_data/pressure_matrix_with_drivers.parquet"))
-  arrow::write_parquet(pm_drivers,
-                       paste0(root, "outputs/model/pressure_matrix_with_drivers.parquet"))
+  arrow::write_parquet(pm_drivers, file.path(model_dir, "pressure_matrix_with_drivers.parquet"))
   timer$done()
-  
+
   # Step 3: build model-ready df
-  model_df <- build_model_ready(pm_drivers, wfd_root,
-                                filter_to_drivers = FALSE, timer)
-  rm(pm_drivers); gc()
-  
+  model_df <- build_model_ready(pm_drivers, wfd_root, filter_to_drivers = FALSE, timer)
+  rm(pm_drivers)
+  gc()
+
   # Step 4: diagnostics
   timer$start("Run diagnostics")
   run_diagnostics(model_df)
   timer$done()
-  
+
   # Step 5: write output
   timer$start("Write model_ready.parquet")
-  # arrow::write_parquet(model_df,
-  #                      paste0(root, "thesis_data/model_ready.parquet"))
-  arrow::write_parquet(model_df,
-                       paste0(root, "outputs/model/model_ready.parquet"))
+  arrow::write_parquet(model_df, file.path(model_dir, "model_ready.parquet"))
   timer$done()
-  
-  cat("\nSaved model_ready.parquet —", nrow(model_df), "rows,",
-      ncol(model_df), "columns\n")
-  
+  cat("\nSaved model_ready.parquet:", nrow(model_df), "rows,", ncol(model_df), "columns\n")
+
   # Print the full timing breakdown
   timer$summary()
-  
   total_elapsed <- (proc.time() - pipeline_start)[["elapsed"]]
-  message(sprintf("\nTotal pipeline wall time: %.1fs (%.1f min)",
-                  total_elapsed, total_elapsed / 60))
-  
+  message(sprintf("\nTotal pipeline wall time: %.1fs (%.1f min)", total_elapsed, total_elapsed / 60))
+
   model_df
 }
-# Default: use cache (skips climate if already computed)
-run_driver_pipeline(use_cache = TRUE)

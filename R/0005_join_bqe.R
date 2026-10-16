@@ -1,12 +1,15 @@
 # Create views to be used for analysis
-library(arrow)
-library(sfarrow)
-library(dplyr)
-library(ggplot2)
+# Joins quality_element table with swb_assessment_reference and filters to desired meterics
+  # Kept only quality element status class 1-5, removed TeW
+  # Only monitoring or expert judgement only with high confidence
+  # United Kingdom (UK) removed
+  # Coastal waters (CW) removed
+  # Angiosperms and macroalgae removed
+  # Added covariates
+  # Added biogeographical region
+  # River basin added
 
-# Load filter qe table
-wfd_root <- "/Users/eleshuk/Documents/ISA_class_materials/Thesis/data/WFD/"
-
+# Join the quality element table to the reference table and write joined_bqe_ref_w2010_final.parquet
 create_qe_ref_join_filtered <- function(wfd_root, qe_interest, export_csv = FALSE, export_parquet = FALSE) {
   
   parquet_root_cleaned <- file.path(wfd_root, "parquet_tables_cleaned")
@@ -59,7 +62,8 @@ create_qe_ref_join_filtered <- function(wfd_root, qe_interest, export_csv = FALS
     dplyr::anti_join(valid_pair_codes, by = "euSurfaceWaterBodyCode") |>
     dplyr::left_join(
       assessment_table |> dplyr::filter(cYear == 2010),
-      by = c("euSurfaceWaterBodyCode", "cYear")
+      by = c("euSurfaceWaterBodyCode", "cYear"),
+      relationship = "many-to-one"
     ) |>
     dplyr::filter(swEcologicalAssessmentConfidence == "High") |>
     dplyr::select(-swEcologicalAssessmentConfidence)
@@ -81,7 +85,7 @@ create_qe_ref_join_filtered <- function(wfd_root, qe_interest, export_csv = FALS
   bqe_monitoring_map <- c("1" = "High", "2" = "Good", "3" = "Moderate", "4" = "Poor", "5" = "Bad")
   
   joined_qe_df <- bqe_df |>
-    dplyr::left_join(ref, by = c("cYear", "euSurfaceWaterBodyCode")) |>
+    dplyr::left_join(ref, by = c("cYear", "euSurfaceWaterBodyCode"), relationship = "many-to-one") |>
     dplyr::arrange(cYear) |>
     dplyr::filter(
       !is.na(qeStatusOrPotentialValue),
@@ -118,18 +122,3 @@ create_qe_ref_join_filtered <- function(wfd_root, qe_interest, export_csv = FALS
   
   joined_qe_df
 }
-
-bqe_data <- create_qe_ref_join_filtered(
-  wfd_root = wfd_root,
-  qe_interest = "QE1 - Biological quality elements",
-  export_csv = FALSE,
-  export_parquet = TRUE
-)
-
-# OR USE
-# qe_interest <- c(
-#   "QE1 - Biological quality elements",
-#   "QE3 - Chemical and physico-chemical quality elements",
-#   "QE2 - Hydromorphological quality elements"
-# )
-# bqe_data_all <- create_qe_ref_join_filtered(wfd_root = wfd_root, qe_interest = qe_interest, export_csv = FALSE, export_parquet = TRUE)

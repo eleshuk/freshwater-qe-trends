@@ -6,3 +6,6 @@ freshwater-qe-trends.Rproj
 /data
 .DS_Store
 python/reports
+grateful-refs.bib
+grateful-report.html
+__pycache__

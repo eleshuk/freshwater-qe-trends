@@ -1,15 +1,5 @@
 # Scrape WISE WFD table and column descriptions from https://discodata.eea.europa.eu/md
 
-library(httr2)
-library(dplyr)
-library(purrr)
-library(tibble)
-library(openxlsx)
-library(arrow)
-
-# Root path for the WFD data folder, outputs are written to its metadata subfolder
-root_path <- "/Users/eleshuk/Documents/ISA_class_materials/Thesis/data/WFD"
-
 # Write a data frame to both parquet and excel
 write_outputs <- function(df, file_name, out_dir) {
   arrow::write_parquet(df, file.path(out_dir, paste0(file_name, ".parquet")))
@@ -83,6 +73,3 @@ scrape_wise_wfd_md <- function(root_path, theme_filter = "SWB") {
     theme_columns = theme_column_md
   ))
 }
-
-# Run the scrape
-wise_md <- scrape_wise_wfd_md(root_path)

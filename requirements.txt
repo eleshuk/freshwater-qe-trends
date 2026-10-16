@@ -1,0 +1,8 @@
+# Packages for python/wfd_workflow.py, pinned to the versions it was tested with
+# Also needs tkinter, which comes with Python itself rather than from pip
+geopandas==1.2.0
+matplotlib==3.11.2
+pandas==3.0.5
+pyarrow==26.0.0
+pyogrio==0.13.0
+shapely==2.2.0

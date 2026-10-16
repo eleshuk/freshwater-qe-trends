@@ -1,11 +1,13 @@
-## Create view merged on the BQE table and the spatial data ----
+# Create view merged on the BQE table and the spatial data
 # Inner joins to only get spatial data that has BQE data
 # Each year's spatial data is read, joined, and written before the next one
 # is loaded, so you never have all three years of geometry in memory at once
-join_bqe_spatial_data <- function(yr) {
+
+# Joins spatial data to BQE data, one file per cycle
+join_bqe_spatial_data <- function(yr, wfd_root) {
   message("Processing ", yr, "...")
   
-  spatial_root <- "/Users/eleshuk/Documents/ISA_class_materials/Thesis/data/WFD/parquet_tables_spatial"
+  spatial_root <- file.path(wfd_root, "parquet_tables_spatial")
   
   # Read spatial files for the given year
   swb <- sfarrow::st_read_parquet(
@@ -17,7 +19,7 @@ join_bqe_spatial_data <- function(yr) {
   
   # Summarise BQE data to one row per water body
   bqe_summary <- arrow::read_parquet(
-    "/Users/eleshuk/Documents/ISA_class_materials/Thesis/data/WFD/parquet_tables_joined/joined_bqe_ref_w2010_final.parquet"
+    file.path(wfd_root, "parquet_tables_joined", "joined_bqe_ref_w2010_final.parquet")
   ) |>
     dplyr::filter(cYear == as.integer(yr)) |>
     dplyr::summarise(
@@ -77,8 +79,3 @@ join_bqe_spatial_data <- function(yr) {
     glue::glue("{spatial_root}/bqe_spatial_joined_{yr}.parquet")
   )
 }
-
-# Run for each year
-join_bqe_spatial_data("2010")
-join_bqe_spatial_data("2016")
-join_bqe_spatial_data("2022")

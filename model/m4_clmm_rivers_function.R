@@ -53,8 +53,7 @@ patch_clmm_condvar <- function() {
 patch_clmm_condvar()
 
 # Root folder shared by all runs
-# root <- "~/Documents/ISA_class_materials/Thesis/outputs/model/"
-root <- "data/outputs/model"
+root <- "data/model"
 
 # Water category codes mapped to the names used in the data file and results folder
 category_names <- c(RW = "rivers", LW = "lakes")
@@ -66,7 +65,7 @@ opt_settings_all <- list(
   sens = list(grad_tol = 1e-4, iter_max = 1000, eval_max = 2000)
 )
 
-# Final covariates (transformed columns from transform_rivers_covariates.R)
+# Final covariates (transformed columns from R/0402_transform_rivers_data.R)
 continuous_vars <- c(
   "bio05", "bio04", "log_bio15", "sqrt_bio18",
   "log_hu_deficit_coldest_qtr", "log_hu_deficit_driest_qtr",
