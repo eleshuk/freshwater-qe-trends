@@ -9,6 +9,7 @@ source("R/0003_strip_shared_cols.R")
 source("R/0004_wfd_cleaning.R")
 source("R/0005_join_bqe.R")
 source("R/0006_filter_reference.R")
+source("R/0007_column_presence.R")
 
 # Paths
 wfd_root <- "data/WFD"
@@ -53,3 +54,11 @@ bqe_data <- create_qe_ref_join_filtered(
 
 # 0006 Filter the reference table to water bodies with BQE data
 filter_ref(wfd_root)
+
+# 0007 Column presence across the raw SWB tables (Fig. S1) and the stripped and cleaned tables (Fig. S2)
+column_presence(parquet_root, list_swb_tables(parquet_root), "data/summary_tables/figS1_column_presence_raw.csv")
+column_presence(
+  parquet_root_cleaned,
+  setdiff(list_swb_tables(parquet_root_cleaned), c("swb_reference_filtered", "swb_surface_water_body_failing_rbsp_sw_failing_rbsp_other")),
+  "data/summary_tables/figS2_column_presence_cleaned.csv"
+)

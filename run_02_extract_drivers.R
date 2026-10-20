@@ -29,6 +29,13 @@ extract_climate(
   catchment_path = catchment_path,
   monthly_dir = file.path(drivers_root, "climate", "outputs")
 )
+# On a machine with limited RAM (e.g. 16 GB), use the batched version instead:
+# source("extract_drivers/0202b_extract_climate_batched.R")
+# extract_climate_batched(
+#   catchment_path = catchment_path,
+#   monthly_dir = file.path(drivers_root, "climate", "outputs"),
+#   batch_size = 100000
+# )
 
 # 0203 Nitrogen surplus
 extract_nitrogen(

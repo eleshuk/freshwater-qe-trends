@@ -3,10 +3,7 @@
 # main effects only, cycle * region, random intercepts for water body and basin,
 # plus country when fit_stage1(country = TRUE)
 # BQEs with a saved fit_<bqe>.RData are skipped unless refit is TRUE
-
-library(arrow)
-library(dplyr)
-library(ordinal)
+# Fits are written to <model_dir>/M4/m4_stage1_results_rivers/RW (about 45 minutes for all five on a MacBook Air)
 
 # Diagonal of the inverse of the random-effects precision matrix, solved in column chunks.
 # clmm computes this for condVar with solve(rho$L), which builds the full inverse; with a
@@ -50,13 +47,15 @@ patch_clmm_condvar <- function() {
   utils::assignInNamespace("clmm.fit.env", fit_env, ns = "ordinal")
   invisible(TRUE)
 }
-patch_clmm_condvar()
-
-# Root folder shared by all runs
-root <- "data/model"
 
 # Water category codes mapped to the names used in the data file and results folder
 category_names <- c(RW = "rivers", LW = "lakes")
+
+# River BQEs modelled in the thesis (phytoplankton is mainly assessed in lakes, so it is not modelled for rivers)
+river_bqes <- c(
+  "QE1-2 - Other aquatic flora", "QE1-2-3 - Macrophytes",
+  "QE1-2-4 - Phytobenthos", "QE1-3 - Benthic invertebrates", "QE1-4 - Fish"
+)
 
 # Optimizer settings by run label; gradTol is the tolerance of the inner random-effect solve,
 # iter.max and eval.max limit the outer nlminb optimizer
@@ -96,8 +95,10 @@ get_re_var <- function(re, name) {
 }
 
 # Fit one clmm per BQE; country toggles the (1 | country) random intercept
-fit_stage1 <- function(country = TRUE, category = "RW", run_label = "main",
+fit_stage1 <- function(model_dir = "data/model", country = TRUE, category = "RW", run_label = "main",
                        bqe_only = NULL, refit = FALSE) {
+  # Use the memory-saving condVar calculation in ordinal
+  patch_clmm_condvar()
   
   # Check arguments and look up settings for this run
   if (!category %in% names(category_names)) {
@@ -108,7 +109,7 @@ fit_stage1 <- function(country = TRUE, category = "RW", run_label = "main",
   }
   opt_settings <- opt_settings_all[[run_label]]
   category_name <- category_names[[category]]
-  data_path <- file.path(root, paste0(category_name, "_model_df_transformed.parquet"))
+  data_path <- file.path(model_dir, paste0(category_name, "_model_df_transformed.parquet"))
   
   # Output folder: category, then the run label unless main, then _no_country without the country RE
   run_folder <- paste0(
@@ -116,7 +117,7 @@ fit_stage1 <- function(country = TRUE, category = "RW", run_label = "main",
     if (run_label != "main") paste0("_", run_label),
     if (!country) "_no_country"
   )
-  out_dir <- file.path(root, "M4", paste0("m4_stage1_results_", category_name), run_folder)
+  out_dir <- file.path(model_dir, "M4", paste0("m4_stage1_results_", category_name), run_folder)
   dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
   
   # Random-effect grouping factors used in the formula, linear predictor and diagnostics
@@ -141,7 +142,7 @@ fit_stage1 <- function(country = TRUE, category = "RW", run_label = "main",
       "| iter.max:", opt_settings$iter_max, "| eval.max:", opt_settings$eval_max, "\n\n")
   
   # Load transformed data; category and CY/MT filters are defensive (the transform script already drops CY/MT)
-  df <- read_parquet(data_path, col_select = dplyr::any_of(keep_cols)) |>
+  df <- arrow::read_parquet(data_path, col_select = dplyr::any_of(keep_cols)) |>
     dplyr::filter(
       surfaceWaterBodyCategory == category,
       !countryCode %in% c("CY", "MT")
@@ -522,15 +523,3 @@ fit_stage1 <- function(country = TRUE, category = "RW", run_label = "main",
   
   invisible(summary_df)
 }
-
-# Without the country RE, for the four BQEs being refitted (writes to M4/m4_stage1_results_rivers/RW_no_country)
-# fit_stage1(
-#   country = FALSE,
-#   bqe_only = c("QE1-2 - Other aquatic flora", "QE1-2-3 - Macrophytes",
-#                "QE1-2-4 - Phytobenthos", "QE1-4 - Fish", "QE1-3 - Benthic invertebrates")
-# )
-
-# With the country RE, all BQEs (writes to M4/m4_stage1_results_rivers/RW)
-fit_stage1(country = TRUE,
-             bqe_only = c("QE1-2 - Other aquatic flora", "QE1-2-3 - Macrophytes",
-                          "QE1-2-4 - Phytobenthos", "QE1-4 - Fish", "QE1-3 - Benthic invertebrates"))

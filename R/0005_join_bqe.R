@@ -10,21 +10,24 @@
   # River basin added
 
 # Join the quality element table to the reference table and write joined_bqe_ref_w2010_final.parquet
-create_qe_ref_join_filtered <- function(wfd_root, qe_interest, export_csv = FALSE, export_parquet = FALSE) {
+# The defaults give the thesis dataset; drop_qe, drop_categories and drop_countries can be changed
+# (e.g. set to NULL) to build less filtered versions, written under file_stem
+create_qe_ref_join_filtered <- function(wfd_root, qe_interest,
+                                        drop_qe = c("QE1-2-2 - Angiosperms", "QE1-2-1 - Macroalgae"),
+                                        drop_categories = c("TeW", "CW"),
+                                        drop_countries = "United Kingdom",
+                                        file_stem = NULL,
+                                        export_csv = FALSE, export_parquet = FALSE) {
   
   parquet_root_cleaned <- file.path(wfd_root, "parquet_tables_cleaned")
   monitoring_type <- c("Expert judgement", "Monitoring")
-  qe_drops <- c("QE1-2-2 - Angiosperms", "QE1-2-1 - Macroalgae")
   
-  all_bqe <- arrow::open_dataset(
+  # Filter out inapplicable, unknown and none, and the dropped qe codes
+  # Plain read_parquet is used because arrow's dataset functions can fail once sf/terra are loaded in the session
+  all_bqe <- arrow::read_parquet(
     file.path(parquet_root_cleaned, "swb_surface_water_body_quality_element", "part-0.parquet")
   ) |>
-    # Filter out inapplicable, unknown, none, and dropped qe codes
-    dplyr::filter(
-      !qeStatusOrPotentialValue %in% c("Unknown", "Inapplicable", "None"),
-      !qeCode %in% qe_drops
-    ) |>
-    dplyr::collect()
+    dplyr::filter(!qeStatusOrPotentialValue %in% c("Unknown", "Inapplicable", "None"), !qeCode %in% drop_qe)
   
   # Find water body/QE pairs with desired monitoring type in both 2016 and 2022
   valid_pairs <- all_bqe |>
@@ -49,11 +52,10 @@ create_qe_ref_join_filtered <- function(wfd_root, qe_interest, export_csv = FALS
     dplyr::semi_join(valid_pairs, by = c("euSurfaceWaterBodyCode", "qeCode"))
   
   # For 2010 water bodies not covered by valid_pairs, include those with high assessment confidence
-  assessment_table <- arrow::open_dataset(
-    file.path(parquet_root_cleaned, "swb_assessment_reference", "part-0.parquet")
-  ) |>
-    dplyr::select(euSurfaceWaterBodyCode, cYear, swEcologicalAssessmentConfidence) |>
-    dplyr::collect()
+  assessment_table <- arrow::read_parquet(
+    file.path(parquet_root_cleaned, "swb_assessment_reference", "part-0.parquet"),
+    col_select = c("euSurfaceWaterBodyCode", "cYear", "swEcologicalAssessmentConfidence")
+  )
   
   valid_pair_codes <- dplyr::distinct(valid_pairs, euSurfaceWaterBodyCode)
   
@@ -76,11 +78,10 @@ create_qe_ref_join_filtered <- function(wfd_root, qe_interest, export_csv = FALS
     "wiseEvolutionType", "surfaceWaterBodyCategory"
   )
   
-  ref <- arrow::open_dataset(
-    file.path(parquet_root_cleaned, "swb_reference", "part-0.parquet")
-  ) |>
-    dplyr::select(dplyr::all_of(cols_of_interest)) |>
-    dplyr::collect()
+  ref <- arrow::read_parquet(
+    file.path(parquet_root_cleaned, "swb_reference", "part-0.parquet"),
+    col_select = dplyr::all_of(cols_of_interest)
+  )
   
   bqe_monitoring_map <- c("1" = "High", "2" = "Good", "3" = "Moderate", "4" = "Poor", "5" = "Bad")
   
@@ -90,11 +91,10 @@ create_qe_ref_join_filtered <- function(wfd_root, qe_interest, export_csv = FALS
     dplyr::filter(
       !is.na(qeStatusOrPotentialValue),
       qeStatusOrPotentialValue != "Unknown",
-      # Filter out territorial and coastal waters
-      !surfaceWaterBodyCategory %in% c("TeW", "CW"),
-      # !surfaceWaterBodyCategory %in% c("TeW"),
-      # Filter out UK
-      countryName != "United Kingdom"
+      # Filter out territorial and coastal waters (by default)
+      !surfaceWaterBodyCategory %in% drop_categories,
+      # Filter out the UK (by default)
+      !countryName %in% drop_countries
     ) |>
     dplyr::mutate(
       qeStatusOrPotentialValueLabel = factor(
@@ -106,11 +106,9 @@ create_qe_ref_join_filtered <- function(wfd_root, qe_interest, export_csv = FALS
   date_prefix <- format(Sys.Date(), "%Y%m%d")
   out_dir <- file.path(wfd_root, "parquet_tables_joined")
   
-  # Use a distinct filename when qe_interest covers more than just QE1
-  if (identical(qe_interest, "QE1 - Biological quality elements")) {
-    file_stem <- "joined_bqe_ref_w2010"
-  } else {
-    file_stem <- "joined_all_qe_ref_w2010"
+  # Use a distinct filename when qe_interest covers more than just QE1, unless a name is given
+  if (is.null(file_stem)) {
+    file_stem <- if (identical(qe_interest, "QE1 - Biological quality elements")) "joined_bqe_ref_w2010" else "joined_all_qe_ref_w2010"
   }
   
   if (export_csv) {

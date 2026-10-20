@@ -9,6 +9,8 @@ source("R/0302_join_no_geom.R")
 source("R/0303_build_driver_matrix.R")
 source("R/0304_merge_biogeography.R")
 source("R/0305_merge_rbs.R")
+source("R/0306_count_filter_steps.R")
+source("R/0005_join_bqe.R")
 
 # Paths
 wfd_root <- "data/WFD"
@@ -48,3 +50,6 @@ merge_rbs(
   input_path = file.path(model_dir, "model_ready_biogeo.parquet"),
   output_path = file.path(model_dir, "model_ready_biogeo_rb.parquet")
 )
+
+# 0306 Water bodies per cycle after each filtering and integration step (Table 7)
+count_filter_steps(wfd_root, model_dir, "data/summary_tables/table7_filter_counts.csv")

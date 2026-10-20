@@ -502,7 +502,7 @@ merge_drivers <- function(pressure_matrix, drivers_root, workflow_gpkg, timer,
   )
   
   # Read bridge table via DBI (no geometry, skip sf overhead)
-  # Include intersection size columns for area-weighted aggregation
+  # Keep the primary catchment area, used as the weight when averaging rates over a water body's catchments
   timer$start("Read sWB_CCM bridge table")
   con <- DBI::dbConnect(RSQLite::SQLite(), workflow_gpkg)
   swb_ccm <- DBI::dbReadTable(con, "sWB_CCM_tbl") |>
@@ -595,8 +595,8 @@ merge_drivers <- function(pressure_matrix, drivers_root, workflow_gpkg, timer,
   timer$done(sprintf("%d rows after bridge join", nrow(driver_by_wb)))
   
   # Aggregate across all proximal catchments per water body,
-  # weighted by intersection size (WB_CCM2_area or WB_CCM2_length)
-  timer$start("Aggregate drivers per water body (area-weighted)")
+  # weighted by primary catchment area (PC_area, or 1 where it is missing)
+  timer$start("Aggregate drivers per water body (catchment-area-weighted)")
   
   clc_area_cols <- c(
     "clc_artificial_m2", "clc_agricultural_m2", "clc_forest_seminatural_m2",

@@ -4,7 +4,8 @@
 # is loaded, so you never have all three years of geometry in memory at once
 
 # Joins spatial data to BQE data, one file per cycle
-join_bqe_spatial_data <- function(yr, wfd_root) {
+# joined_file and suffix allow other versions of the joined BQE table (e.g. for the exploration maps)
+join_bqe_spatial_data <- function(yr, wfd_root, joined_file = "joined_bqe_ref_w2010_final.parquet", suffix = NULL) {
   message("Processing ", yr, "...")
   
   spatial_root <- file.path(wfd_root, "parquet_tables_spatial")
@@ -19,7 +20,7 @@ join_bqe_spatial_data <- function(yr, wfd_root) {
   
   # Summarise BQE data to one row per water body
   bqe_summary <- arrow::read_parquet(
-    file.path(wfd_root, "parquet_tables_joined", "joined_bqe_ref_w2010_final.parquet")
+    file.path(wfd_root, "parquet_tables_joined", joined_file)
   ) |>
     dplyr::filter(cYear == as.integer(yr)) |>
     dplyr::summarise(
@@ -76,6 +77,6 @@ join_bqe_spatial_data <- function(yr, wfd_root) {
   
   sfarrow::st_write_parquet(
     combined,
-    glue::glue("{spatial_root}/bqe_spatial_joined_{yr}.parquet")
+    file.path(spatial_root, paste0("bqe_spatial_joined_", yr, if (!is.null(suffix)) paste0("_", suffix), ".parquet"))
   )
 }

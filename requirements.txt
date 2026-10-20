@@ -1,4 +1,4 @@
-# Packages for python/wfd_workflow.py, pinned to the versions it was tested with
+# Packages for python/0102_assign_catchments.py and python/0704_plot_bqe_maps.py, pinned to tested versions
 # Also needs tkinter, which comes with Python itself rather than from pip
 geopandas==1.2.0
 matplotlib==3.11.2
