@@ -6,9 +6,9 @@ This repository contains code to 1) scrape WISE WFD data and metadata from [Disc
 
 This study builds a harmonized, water body-level dataset of Water Framework Directive (WFD) surface water biological quality element (BQE) status for the 2010, 2016, and 2022 reporting cycles. The dataset integrates spatial, climate, land use, nutrient, and reported pressures data, and develops a semi-automated pipeline that can rerun as new reporting cycles are released. Then, looking only at rivers and using mixed-effects ordinal models, it asks:
 
-1.  What are the spatial and temporal patterns in river BQE status across Europe
+1.  What are the spatial and temporal patterns in river BQE status across Europe?
 
-2.  Which drivers and pressures are associated with BQE status, and how do they differ between BQEs
+2.  Which drivers and pressures are associated with BQE status, and how do they differ between BQEs?
 
 3.  How much variation in status is attributable to location and national assessment, compared with drivers and pressures?
 
