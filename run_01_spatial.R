@@ -1,12 +1,16 @@
 # Pipeline 01: prepare the WFD water bodies for the CCM2 catchment join
 # Run from the project root after run_00_scrape_clean.R
-# Output: data/spatial/ccm2_wfd_join/Input_data_filtered.gpkg
+# Outputs: data/WFD/parquet_tables_spatial/{surface_water_bodies,rivers}/, data/spatial/ccm2_wfd_join/Input_data_filtered.gpkg
 
 # Load the functions for this pipeline
+source("R/0100_split_wfd_spatial.R")
 source("R/0101_remove_cw_input_gpkg.R")
 
 # Paths
 ccm2_wfd_dir <- "data/spatial/ccm2_wfd_join"
+
+# 0100 Split the WFD spatial GeoPackages into one GeoParquet per cycle for polygons and lines (read by 0301)
+purrr::walk(c("2010", "2016", "2022"), \(yr) split_wfd_spatial(yr, "data/WFD/spatial_data", "data/WFD/parquet_tables_spatial"))
 
 # 0101 Remove coastal waters and water bodies without BQE data
 remove_cw_input_gpkg(

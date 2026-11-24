@@ -10,6 +10,7 @@ source("R/0303_build_driver_matrix.R")
 source("R/0304_merge_biogeography.R")
 source("R/0305_merge_rbs.R")
 source("R/0306_count_filter_steps.R")
+source("R/0103_dissolve_drainage_areas.R")
 source("R/0005_join_bqe.R")
 
 # Paths
@@ -32,6 +33,13 @@ model_df <- run_driver_pipeline(
   cache_dir = "data/driver_cache",
   model_dir = model_dir,
   use_cache = TRUE
+)
+
+# 0103 Dissolve each water body's CCM2 catchments into one drainage area (used by 0304)
+dissolve_drainage_areas(
+  workflow_gpkg = workflow_gpkg,
+  catchment_gpkg = "data/spatial/ccm2_wfd_join/Input_data_filtered.gpkg",
+  output_gpkg = "data/biogeographical_regions/WB_drainage_areas.gpkg"
 )
 
 # 0304 Add biogeographical regions
