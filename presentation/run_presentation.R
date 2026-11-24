@@ -21,3 +21,4 @@ wb_maps <- plot_wb_context(
 
 # River water bodies in the models per cycle, split by how many cycles each appears in
 cycle_bars <- plot_wb_cycle_bars(out_file = "plots/presentation/wb_cycle_bars.png")
+
