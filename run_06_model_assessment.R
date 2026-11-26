@@ -11,7 +11,7 @@ source("R/0602_po_checks.R")
 source("R/0603_standardized_re_qq.R")
 
 # Paths
-results_dir <- "data/model/M4/m4_stage1_results_rivers/RW"
+results_dir <- "data/model"
 
 # 0601 AIC comparison, weighted kappa and observed vs predicted class shares
 fit_assessment <- run_fit_assessment(results_dir)

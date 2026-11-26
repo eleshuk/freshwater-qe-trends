@@ -1,10 +1,12 @@
 """Maps of the BQE data for data exploration: thesis Fig. 4 (BQEs per water body), Fig. 5 (change in BQEs
-between cycles), Fig. 6 and Fig. S8 (status per BQE).
+between cycles), Fig. 6 and Fig. S8 (status per BQE), and the ecological status of the
+river water bodies used in the models.
 
-Run from the project root after the maps data step in run_07_figures.R, e.g.
+Run from the project root:
     python python/0704_plot_bqe_maps.py
-    python python/0704_plot_bqe_maps.py --joined-file joined_bqe_ref_w2010_final.parquet --spatial-suffix ""
-The defaults map the less filtered exploration dataset (UK, coastal waters, angiosperms and macroalgae kept).
+The defaults map the thesis dataset. To map the less filtered dataset from step 0704 in run_07_figures.R
+(UK, coastal waters, angiosperms and macroalgae kept):
+    python python/0704_plot_bqe_maps.py --joined-file joined_bqe_ref_maps_final.parquet --spatial-suffix maps
 Requires Python 3.12 with pandas, geopandas and matplotlib.
 """
 import argparse
@@ -84,6 +86,9 @@ def style_map_axis(ax, title, xlim, ylim):
     ax.set_title(title, fontsize=PANEL_TITLE_SIZE, fontweight="bold", pad=4)
     ax.set_xticks([])
     ax.set_yticks([])
+    # Newer geopandas labels projected axes with Easting and Northing
+    ax.set_xlabel("")
+    ax.set_ylabel("")
 
 
 def plot_bqe_count_levels(spatial_path, spatial_suffix, europe, output_path):
@@ -180,25 +185,67 @@ def plot_bqe_count_change(bqe_counts, geom, europe, output_path):
     print(f"Saved: {output_path}")
 
 
+WFD_COLOURS = {
+    "High": "#0070C0", "Good": "#00B050", "Moderate": "#FFFF00",
+    "Poor": "#FF6600", "Bad": "#FF0000",
+}
+STATUS_ORDER = ["High", "Good", "Moderate", "Poor", "Bad"]
+CYCLE_MAP = {"2010": "Cycle 1 (2010)", "2016": "Cycle 2 (2016)", "2022": "Cycle 3 (2022)"}
+
+
+def plot_status_facet(merged, europe, title, legend_title, output_path):
+    """Draw one status map faceted by reporting cycle; merged needs cycle, status_int, geom_type and geom."""
+    cmap = mcolors.ListedColormap([WFD_COLOURS[s] for s in STATUS_ORDER])
+    norm = mcolors.BoundaryNorm(np.arange(-0.5, len(STATUS_ORDER)), cmap.N)
+
+    fig, axes = plt.subplots(1, 3, figsize=FIGSIZE, facecolor="white")
+    fig.subplots_adjust(left=0.01, right=0.99, top=0.84, bottom=0.2, wspace=0.04)
+
+    for ax, cycle in zip(axes, CYCLE_MAP.values()):
+        cycle_data = merged[merged["cycle"] == cycle]
+        polys = cycle_data[cycle_data["geom_type"] == "polygon"]
+        lines = cycle_data[cycle_data["geom_type"] == "linestring"]
+
+        ax.set_facecolor("#C8D8E8")
+        europe.plot(ax=ax, color="#E8E4DC", edgecolor="#B0A898", linewidth=0.3)
+
+        if not polys.empty:
+            polys.plot(ax=ax, column="status_int", cmap=cmap, norm=norm,
+                       edgecolor="none", alpha=0.85)
+        if not lines.empty:
+            lines.plot(ax=ax, column="status_int", cmap=cmap, norm=norm,
+                       linewidth=0.5, alpha=0.85)
+
+        style_map_axis(ax, cycle, EUROPE_XLIM, EUROPE_YLIM)
+
+    legend_handles = [
+        plt.Line2D([0], [0], marker="s", color="w",
+                   markerfacecolor=WFD_COLOURS[s], markersize=LEGEND_MARKER_SIZE, label=s)
+        for s in STATUS_ORDER
+    ]
+    fig.legend(
+        handles=legend_handles, loc="lower center", ncol=5,
+        fontsize=LEGEND_TEXT_SIZE, title=legend_title,
+        title_fontsize=LEGEND_TITLE_SIZE, frameon=False,
+        bbox_to_anchor=(0.5, 0.0), handletextpad=0.2, columnspacing=1.0,
+    )
+
+    fig.suptitle(title, fontsize=SUPTITLE_SIZE, fontweight="bold", x=0.01, ha="left", y=0.99)
+
+    plt.savefig(output_path, dpi=DPI, bbox_inches="tight")
+    plt.close()
+    print(f"Saved: {output_path}")
+
+
 def plot_bqe_status_maps(tab, geom, europe, output_dir):
     """Map quality element status per BQE, faceted by reporting cycle."""
-    WFD_COLOURS = {
-        "High": "#0070C0", "Good": "#00B050", "Moderate": "#FFFF00",
-        "Poor": "#FF6600", "Bad": "#FF0000",
-    }
-    status_order = ["High", "Good", "Moderate", "Poor", "Bad"]
-    cmap = mcolors.ListedColormap([WFD_COLOURS[s] for s in status_order])
-    norm = mcolors.BoundaryNorm(np.arange(-0.5, len(status_order)), cmap.N)
-    status_to_int = {s: i for i, s in enumerate(status_order)}
-
-    cycle_map = {"2010": "Cycle 1 (2010)", "2016": "Cycle 2 (2016)", "2022": "Cycle 3 (2022)"}
-    cycles = list(cycle_map.values())
+    status_to_int = {s: i for i, s in enumerate(STATUS_ORDER)}
 
     for qe_code in sorted(tab["qeCode"].dropna().unique()):
         bqe_name = qe_code.split(" - ", 1)[1] if " - " in qe_code else qe_code
 
         subset = tab[tab["qeCode"] == qe_code].copy()
-        subset["cycle"] = subset["cYear"].astype(str).map(cycle_map)
+        subset["cycle"] = subset["cYear"].astype(str).map(CYCLE_MAP)
         subset["status_int"] = subset["qeStatusOrPotentialValueLabel"].map(status_to_int)
         subset = subset.dropna(subset=["status_int", "cycle"])
 
@@ -211,56 +258,57 @@ def plot_bqe_status_maps(tab, geom, europe, output_dir):
         if merged.empty:
             continue
 
-        fig, axes = plt.subplots(1, 3, figsize=FIGSIZE, facecolor="white")
-        fig.subplots_adjust(left=0.01, right=0.99, top=0.84, bottom=0.2, wspace=0.04)
-
-        for ax, cycle in zip(axes, cycles):
-            cycle_data = merged[merged["cycle"] == cycle]
-            polys = cycle_data[cycle_data["geom_type"] == "polygon"]
-            lines = cycle_data[cycle_data["geom_type"] == "linestring"]
-
-            ax.set_facecolor("#C8D8E8")
-            europe.plot(ax=ax, color="#E8E4DC", edgecolor="#B0A898", linewidth=0.3)
-
-            if not polys.empty:
-                polys.plot(ax=ax, column="status_int", cmap=cmap, norm=norm,
-                           edgecolor="none", alpha=0.85)
-            if not lines.empty:
-                lines.plot(ax=ax, column="status_int", cmap=cmap, norm=norm,
-                           linewidth=0.5, alpha=0.85)
-
-            style_map_axis(ax, cycle, EUROPE_XLIM, EUROPE_YLIM)
-
-        legend_handles = [
-            plt.Line2D([0], [0], marker="s", color="w",
-                       markerfacecolor=WFD_COLOURS[s], markersize=LEGEND_MARKER_SIZE, label=s)
-            for s in status_order
-        ]
-        fig.legend(
-            handles=legend_handles, loc="lower center", ncol=5,
-            fontsize=LEGEND_TEXT_SIZE, title="Quality element status",
-            title_fontsize=LEGEND_TITLE_SIZE, frameon=False,
-            bbox_to_anchor=(0.5, 0.0), handletextpad=0.2, columnspacing=1.0,
-        )
-
-        fig.suptitle(bqe_name, fontsize=SUPTITLE_SIZE, fontweight="bold", x=0.01, ha="left", y=0.99)
-
         safe_name = qe_code.split(" - ")[0].replace("-", "_")
-        out = Path(output_dir) / f"bqe_status_{safe_name}.png"
-        plt.savefig(out, dpi=DPI, bbox_inches="tight")
-        plt.close()
-        print(f"Saved: {out}")
+        plot_status_facet(merged, europe, bqe_name, "Quality element status",
+                          Path(output_dir) / f"bqe_status_{safe_name}.png")
+
+
+def plot_ecological_status_map(tab, geom, europe, model_dir, output_path):
+    """Map the reported ecological status of the river water bodies used in the models, faceted by cycle."""
+    # Ecological status codes 1 to 5 run from High to Bad; Unknown is dropped
+    code_to_int = {str(i + 1): i for i in range(len(STATUS_ORDER))}
+
+    # Water body and cycle pairs in any of the fitted river models
+    modelled = (
+        pd.concat([
+            pd.read_csv(f, usecols=["euSurfaceWaterBodyCode", "cYear"], dtype=str)
+            for f in Path(model_dir).glob("linear_predictors_*.csv")
+        ])
+        .drop_duplicates()
+    )
+
+    # One row per modelled water body and cycle
+    subset = (
+        tab.assign(cYear=tab["cYear"].astype(str))
+        .drop_duplicates(["euSurfaceWaterBodyCode", "cYear"])
+        .merge(modelled, on=["euSurfaceWaterBodyCode", "cYear"], how="inner")
+        .assign(
+            cycle=lambda d: d["cYear"].map(CYCLE_MAP),
+            status_int=lambda d: d["swEcologicalStatusOrPotentialValue"].astype(str).map(code_to_int),
+        )
+        .dropna(subset=["status_int", "cycle"])
+    )
+
+    merged = geom.merge(
+        subset[["euSurfaceWaterBodyCode", "cycle", "status_int"]],
+        on="euSurfaceWaterBodyCode",
+        how="inner",
+    )
+
+    plot_status_facet(merged, europe, "Ecological status of modelled rivers", "Ecological status", output_path)
 
 
 def main():
     """Read the command line options and draw all maps."""
     parser = argparse.ArgumentParser(description="Draw the BQE exploration maps")
     parser.add_argument("--wfd-root", default="data/WFD", help="WFD data folder")
-    parser.add_argument("--joined-file", default="joined_bqe_ref_maps_final.parquet",
+    parser.add_argument("--joined-file", default="joined_bqe_ref_w2010_final.parquet",
                         help="Joined BQE table in parquet_tables_joined")
-    parser.add_argument("--spatial-suffix", default="maps",
-                        help="Suffix of the bqe_spatial_joined_<year>_<suffix>.parquet files; empty for the thesis dataset")
+    parser.add_argument("--spatial-suffix", default="final",
+                        help="Suffix of the bqe_spatial_joined_<year>_<suffix>.parquet files")
     parser.add_argument("--europe", default="data/drivers/ne_50m_europe.gpkg", help="Basemap of Europe")
+    parser.add_argument("--model-dir", default="data/model",
+                        help="Folder with the linear_predictors_*.csv files of the river models")
     parser.add_argument("--output-dir", default="plots/maps", help="Folder for the map images")
     args = parser.parse_args()
 
@@ -275,7 +323,9 @@ def main():
     plot_bqe_count_levels(spatial_path, args.spatial_suffix, europe, output_path=output_dir / "bqe_count_facet.png")
     plot_bqe_count_change(bqe_counts, geom, europe, output_path=output_dir / "bqe_count_change.png")
     plot_bqe_status_maps(tab, geom, europe, output_dir=output_dir)
+    plot_ecological_status_map(tab, geom, europe, args.model_dir, output_path=output_dir / "ecological_status.png")
 
 
 if __name__ == "__main__":
     main()
+

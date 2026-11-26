@@ -3,7 +3,7 @@
 # main effects only, cycle * region, random intercepts for water body and basin,
 # plus country when fit_stage1(country = TRUE)
 # BQEs with a saved fit_<bqe>.RData are skipped unless refit is TRUE
-# Fits are written to <model_dir>/M4/m4_stage1_results_rivers/RW (about 45 minutes for all five on a MacBook Air)
+# Fits for the main river run are written to <model_dir>, other runs to <model_dir>/M4/m4_stage1_results_<category>/<run> (about 45 minutes for all five on a MacBook Air)
 
 # Diagonal of the inverse of the random-effects precision matrix, solved in column chunks.
 # clmm computes this for condVar with solve(rho$L), which builds the full inverse; with a
@@ -117,7 +117,11 @@ fit_stage1 <- function(model_dir = "data/model", country = TRUE, category = "RW"
     if (run_label != "main") paste0("_", run_label),
     if (!country) "_no_country"
   )
-  out_dir <- file.path(model_dir, "M4", paste0("m4_stage1_results_", category_name), run_folder)
+  out_dir <- if (run_folder == "RW") {
+    model_dir
+  } else {
+    file.path(model_dir, "M4", paste0("m4_stage1_results_", category_name), run_folder)
+  }
   dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
   
   # Random-effect grouping factors used in the formula, linear predictor and diagnostics

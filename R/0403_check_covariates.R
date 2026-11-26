@@ -81,6 +81,7 @@ plot_cor_heatmap <- function(data, vars, title, order = NULL) {
 
 # Print and return pairs with |r| >= threshold
 flag_high_cor <- function(data, vars, family_name, threshold = 0.8) {
+  # R's default is Pearson
   mat <- cor(data[, vars, drop = FALSE], use = "pairwise.complete.obs")
   mat[upper.tri(mat, diag = TRUE)] <- NA
   

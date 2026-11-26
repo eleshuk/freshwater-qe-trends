@@ -1,6 +1,6 @@
 # Pipeline 07: thesis result figures and tables, and the data for the exploration maps
 # Run from the project root after run_06_model_assessment.R
-# Figures go to plots/model_results and plots/maps, tables to data/model/M4/m4_stage1_results_rivers/RW/tables
+# Figures go to plots/model_results and plots/maps, tables to data/model/tables
 
 # Load packages and functions for this pipeline
 library(ggplot2)
@@ -14,7 +14,7 @@ source("R/0301_create_spatial_joined.R")
 
 # Paths
 wfd_root <- "data/WFD"
-results_dir <- "data/model/M4/m4_stage1_results_rivers/RW"
+results_dir <- "data/model"
 table_dir <- file.path(results_dir, "tables")
 results <- load_bqe_results(results_dir)
 

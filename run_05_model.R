@@ -1,7 +1,7 @@
 # Pipeline 05: fit the per-BQE ordinal CLMMs for rivers (thesis sections 2.8-2.9)
 # Run from the project root after run_04_model_prep.R; takes about 45 minutes for all five BQEs on a MacBook Air
 # BQEs that already have a saved fit are skipped, set refit = TRUE to refit them
-# Output: data/model/M4/m4_stage1_results_rivers/RW (fits, coefficients, linear predictors, log, summary)
+# Output: data/model (fits, coefficients, linear predictors, log, summary)
 
 # Load the functions for this pipeline
 source("R/0501_fit_clmm.R")
